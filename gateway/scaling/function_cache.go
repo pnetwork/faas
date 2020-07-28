@@ -8,56 +8,54 @@ import (
 	"time"
 )
 
-// FunctionMeta holds the last refresh and any other
-// meta-data needed for caching.
-type FunctionMeta struct {
-	LastRefresh          time.Time
-	ServiceQueryResponse ServiceQueryResponse
-}
-
-// Expired find out whether the cache item has expired with
-// the given expiry duration from when it was stored.
-func (fm *FunctionMeta) Expired(expiry time.Duration) bool {
-	return time.Now().After(fm.LastRefresh.Add(expiry))
+// FunctionCacher queries functions and caches the results
+type FunctionCacher interface {
+	Set(functionName, namespace string, serviceQueryResponse ServiceQueryResponse)
+	Get(functionName, namespace string) (ServiceQueryResponse, bool)
 }
 
 // FunctionCache provides a cache of Function replica counts
 type FunctionCache struct {
 	Cache  map[string]*FunctionMeta
 	Expiry time.Duration
-	Sync   sync.Mutex
+	Sync   sync.RWMutex
+}
+
+// NewFunctionCache creates a function cache to query function metadata
+func NewFunctionCache(cacheExpiry time.Duration) FunctionCacher {
+	return &FunctionCache{
+		Cache:  make(map[string]*FunctionMeta),
+		Expiry: cacheExpiry,
+	}
 }
 
 // Set replica count for functionName
-func (fc *FunctionCache) Set(functionName string, serviceQueryResponse ServiceQueryResponse) {
+func (fc *FunctionCache) Set(functionName, namespace string, queryRes ServiceQueryResponse) {
 	fc.Sync.Lock()
 	defer fc.Sync.Unlock()
 
-	if _, exists := fc.Cache[functionName]; !exists {
-		fc.Cache[functionName] = &FunctionMeta{}
+	if _, exists := fc.Cache[functionName+"."+namespace]; !exists {
+		fc.Cache[functionName+"."+namespace] = &FunctionMeta{}
 	}
 
-	entry := fc.Cache[functionName]
-	entry.LastRefresh = time.Now()
-	entry.ServiceQueryResponse = serviceQueryResponse
-
+	fc.Cache[functionName+"."+namespace].LastRefresh = time.Now()
+	fc.Cache[functionName+"."+namespace].ServiceQueryResponse = queryRes
 }
 
 // Get replica count for functionName
-func (fc *FunctionCache) Get(functionName string) (ServiceQueryResponse, bool) {
-
-	fc.Sync.Lock()
-	defer fc.Sync.Unlock()
-
-	replicas := ServiceQueryResponse{
+func (fc *FunctionCache) Get(functionName, namespace string) (ServiceQueryResponse, bool) {
+	queryRes := ServiceQueryResponse{
 		AvailableReplicas: 0,
 	}
 
 	hit := false
-	if val, exists := fc.Cache[functionName]; exists {
-		replicas = val.ServiceQueryResponse
+	fc.Sync.RLock()
+	defer fc.Sync.RUnlock()
+
+	if val, exists := fc.Cache[functionName+"."+namespace]; exists {
+		queryRes = val.ServiceQueryResponse
 		hit = !val.Expired(fc.Expiry)
 	}
 
-	return replicas, hit
+	return queryRes, hit
 }

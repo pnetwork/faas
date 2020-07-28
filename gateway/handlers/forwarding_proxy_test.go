@@ -136,6 +136,11 @@ func Test_getServiceName(t *testing.T) {
 			serviceName: "testFunc",
 		},
 		{
+			name:        "includes namespace",
+			url:         "/function/test1.fn",
+			serviceName: "test1.fn",
+		},
+		{
 			name:        "can handle request with trailing slash",
 			url:         "/function/testFunc/",
 			serviceName: "testFunc",
@@ -337,4 +342,23 @@ func Test_buildUpstreamRequest_WithPathAndQuery(t *testing.T) {
 		t.Fail()
 	}
 
+}
+
+func Test_deleteHeaders(t *testing.T) {
+	h := http.Header{}
+	target := "X-Dont-Forward"
+	h.Add(target, "value1")
+	h.Add("X-Keep-This", "value2")
+
+	deleteHeaders(&h, &[]string{target})
+
+	if h.Get(target) == "value1" {
+		t.Errorf("want %s to be removed from headers", target)
+		t.Fail()
+	}
+
+	if h.Get("X-Keep-This") != "value2" {
+		t.Errorf("want %s to remain in headers", "X-Keep-This")
+		t.Fail()
+	}
 }

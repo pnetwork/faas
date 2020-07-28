@@ -26,6 +26,45 @@ func TestHandler_make(t *testing.T) {
 	}
 }
 
+func TestHandler_TransferEncodingPassedToFunction(t *testing.T) {
+	rr := httptest.NewRecorder()
+
+	body := "Message"
+	req, err := http.NewRequest(http.MethodPost, "/", bytes.NewBufferString(body))
+	req.TransferEncoding = []string{
+		"chunked",
+	}
+	req.ContentLength = -1
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	config := WatchdogConfig{
+		faasProcess: "env",
+		cgiHeaders:  true,
+	}
+	handler := makeRequestHandler(&config)
+	handler(rr, req)
+
+	required := http.StatusOK
+	if status := rr.Code; status != required {
+		t.Errorf("handler returned wrong status code - got: %v, want: %v",
+			status, required)
+	}
+
+	read, _ := ioutil.ReadAll(rr.Body)
+	val := string(read)
+	if !strings.Contains(val, `Http_ContentLength=-1`) {
+		t.Errorf(config.faasProcess+" should print: Http_ContentLength=-1, got: %s\n", val)
+	}
+
+	if !strings.Contains(val, "Http_Transfer_Encoding") {
+		t.Errorf(config.faasProcess+" should print: Http_Transfer_Encoding=chunked, got: %s\n", val)
+	}
+
+}
+
 func TestHandler_HasCustomHeaderInFunction_WithCgi_Mode(t *testing.T) {
 	rr := httptest.NewRecorder()
 
@@ -54,6 +93,9 @@ func TestHandler_HasCustomHeaderInFunction_WithCgi_Mode(t *testing.T) {
 	val := string(read)
 	if !strings.Contains(val, "Http_ContentLength=0") {
 		t.Errorf(config.faasProcess+" should print: Http_ContentLength=0, got: %s\n", val)
+	}
+	if !strings.Contains(val, "Http_Content_Length=0") {
+		t.Errorf(config.faasProcess+" should print: Http_Content_Length=0, got: %s\n", val)
 	}
 	if !strings.Contains(val, "Http_Custom_Header") {
 		t.Errorf(config.faasProcess+" should print: Http_Custom_Header, got: %s\n", val)
@@ -93,6 +135,9 @@ func TestHandler_HasCustomHeaderInFunction_WithCgiMode_AndBody(t *testing.T) {
 	val := string(read)
 	if !strings.Contains(val, fmt.Sprintf("Http_ContentLength=%d", len(body))) {
 		t.Errorf("'env' should printed: Http_ContentLength=0, got: %s\n", val)
+	}
+	if !strings.Contains(val, fmt.Sprintf("Http_Content_Length=%d", len(body))) {
+		t.Errorf("'env' should printed: Http_Content_Length=0, got: %s\n", val)
 	}
 	if !strings.Contains(val, "Http_Custom_Header") {
 		t.Errorf("'env' should printed: Http_Custom_Header, got: %s\n", val)

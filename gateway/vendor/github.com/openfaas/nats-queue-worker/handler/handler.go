@@ -1,67 +1,35 @@
 package handler
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-
-	"github.com/nats-io/go-nats-streaming"
-	"github.com/openfaas/faas/gateway/queue"
-	"regexp"
+	"sync"
 )
 
-// NatsQueue queue for work
-type NatsQueue struct {
-	nc stan.Conn
-}
-
-type NatsConfig interface {
-	GetClientID() string
-}
-
-type DefaultNatsConfig struct {
-}
-
-var supportedCharacters, _ = regexp.Compile("[^a-zA-Z0-9-_]+")
-
-func (DefaultNatsConfig) GetClientID() string {
-	val, _ := os.Hostname()
-	return getClientId(val)
-}
-
-// CreateNatsQueue ready for asynchronous processing
-func CreateNatsQueue(address string, port int, clientConfig NatsConfig) (*NatsQueue, error) {
-	queue1 := NatsQueue{}
+// CreateNATSQueue ready for asynchronous processing
+func CreateNATSQueue(address string, port int, clusterName, channel string, clientConfig NATSConfig) (*NATSQueue, error) {
 	var err error
 	natsURL := fmt.Sprintf("nats://%s:%d", address, port)
 	log.Printf("Opening connection to %s\n", natsURL)
 
 	clientID := clientConfig.GetClientID()
-	clusterID := "faas-cluster"
 
-	nc, err := stan.Connect(clusterID, clientID, stan.NatsURL(natsURL))
-	queue1.nc = nc
-
-	return &queue1, err
-}
-
-// Queue request for processing
-func (q *NatsQueue) Queue(req *queue.Request) error {
-	var err error
-
-	fmt.Printf("NatsQueue - submitting request: %s.\n", req.Function)
-
-	out, err := json.Marshal(req)
-	if err != nil {
-		log.Println(err)
+	// If 'channel' is empty, use the previous default.
+	if channel == "" {
+		channel = "faas-request"
 	}
 
-	err = q.nc.Publish("faas-request", out)
+	queue1 := NATSQueue{
+		ClientID:       clientID,
+		ClusterID:      clusterName,
+		NATSURL:        natsURL,
+		Topic:          channel,
+		maxReconnect:   clientConfig.GetMaxReconnect(),
+		reconnectDelay: clientConfig.GetReconnectDelay(),
+		ncMutex:        &sync.RWMutex{},
+	}
 
-	return err
-}
+	err = queue1.connect()
 
-func getClientId(hostname string) string {
-	return "faas-publisher-" + supportedCharacters.ReplaceAllString(hostname, "_")
+	return &queue1, err
 }

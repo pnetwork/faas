@@ -6,6 +6,8 @@ package plugin
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"net/http"
@@ -13,17 +15,20 @@ import (
 	"strconv"
 	"time"
 
-	"fmt"
-
-	"io/ioutil"
-
-	"github.com/openfaas/faas-provider/auth"
-	"github.com/openfaas/faas/gateway/requests"
+	types "github.com/openfaas/faas-provider/types"
+	middleware "github.com/openfaas/faas/gateway/pkg/middleware"
 	"github.com/openfaas/faas/gateway/scaling"
 )
 
+// ExternalServiceQuery proxies service queries to external plugin via HTTP
+type ExternalServiceQuery struct {
+	URL          url.URL
+	ProxyClient  http.Client
+	AuthInjector middleware.AuthInjector
+}
+
 // NewExternalServiceQuery proxies service queries to external plugin via HTTP
-func NewExternalServiceQuery(externalURL url.URL, credentials *auth.BasicAuthCredentials) scaling.ServiceQuery {
+func NewExternalServiceQuery(externalURL url.URL, authInjector middleware.AuthInjector) scaling.ServiceQuery {
 	timeout := 3 * time.Second
 
 	proxyClient := http.Client{
@@ -41,38 +46,27 @@ func NewExternalServiceQuery(externalURL url.URL, credentials *auth.BasicAuthCre
 	}
 
 	return ExternalServiceQuery{
-		URL:         externalURL,
-		ProxyClient: proxyClient,
-		Credentials: credentials,
+		URL:          externalURL,
+		ProxyClient:  proxyClient,
+		AuthInjector: authInjector,
 	}
 }
 
-// ExternalServiceQuery proxies service queries to external plugin via HTTP
-type ExternalServiceQuery struct {
-	URL         url.URL
-	ProxyClient http.Client
-	Credentials *auth.BasicAuthCredentials
-}
-
-// ScaleServiceRequest request scaling of replica
-type ScaleServiceRequest struct {
-	ServiceName string `json:"serviceName"`
-	Replicas    uint64 `json:"replicas"`
-}
-
 // GetReplicas replica count for function
-func (s ExternalServiceQuery) GetReplicas(serviceName string) (scaling.ServiceQueryResponse, error) {
+func (s ExternalServiceQuery) GetReplicas(serviceName, serviceNamespace string) (scaling.ServiceQueryResponse, error) {
+	start := time.Now()
+
 	var err error
 	var emptyServiceQueryResponse scaling.ServiceQueryResponse
 
-	function := requests.Function{}
+	function := types.FunctionStatus{}
 
-	urlPath := fmt.Sprintf("%ssystem/function/%s", s.URL.String(), serviceName)
+	urlPath := fmt.Sprintf("%ssystem/function/%s?namespace=%s", s.URL.String(), serviceName, serviceNamespace)
 
 	req, _ := http.NewRequest(http.MethodGet, urlPath, nil)
 
-	if s.Credentials != nil {
-		req.SetBasicAuth(s.Credentials.User, s.Credentials.Password)
+	if s.AuthInjector != nil {
+		s.AuthInjector.Inject(req)
 	}
 
 	res, err := s.ProxyClient.Do(req)
@@ -91,7 +85,10 @@ func (s ExternalServiceQuery) GetReplicas(serviceName string) (scaling.ServiceQu
 			if err != nil {
 				log.Println(urlPath, err)
 			}
+			log.Printf("GetReplicas [%s.%s] took: %fs", serviceName, serviceNamespace, time.Since(start).Seconds())
+
 		} else {
+			log.Printf("GetReplicas [%s.%s] took: %fs, code: %d\n", serviceName, serviceNamespace, time.Since(start).Seconds(), res.StatusCode)
 			return emptyServiceQueryResponse, fmt.Errorf("server returned non-200 status code (%d) for function, %s", res.StatusCode, serviceName)
 		}
 	}
@@ -114,6 +111,7 @@ func (s ExternalServiceQuery) GetReplicas(serviceName string) (scaling.ServiceQu
 			log.Printf("Bad Scaling Factor: %d, is not in range of [0 - 100]. Will fallback to %d", extractedScalingFactor, scalingFactor)
 		}
 	}
+	log.Printf("GetReplicas [%s.%s] took: %fs", serviceName, serviceNamespace, time.Since(start).Seconds())
 
 	return scaling.ServiceQueryResponse{
 		Replicas:          function.Replicas,
@@ -121,14 +119,15 @@ func (s ExternalServiceQuery) GetReplicas(serviceName string) (scaling.ServiceQu
 		MinReplicas:       minReplicas,
 		ScalingFactor:     scalingFactor,
 		AvailableReplicas: availableReplicas,
+		Annotations:       function.Annotations,
 	}, err
 }
 
 // SetReplicas update the replica count
-func (s ExternalServiceQuery) SetReplicas(serviceName string, count uint64) error {
+func (s ExternalServiceQuery) SetReplicas(serviceName, serviceNamespace string, count uint64) error {
 	var err error
 
-	scaleReq := ScaleServiceRequest{
+	scaleReq := types.ScaleServiceRequest{
 		ServiceName: serviceName,
 		Replicas:    count,
 	}
@@ -138,11 +137,12 @@ func (s ExternalServiceQuery) SetReplicas(serviceName string, count uint64) erro
 		return err
 	}
 
-	urlPath := fmt.Sprintf("%ssystem/scale-function/%s", s.URL.String(), serviceName)
+	start := time.Now()
+	urlPath := fmt.Sprintf("%ssystem/scale-function/%s?namespace=%s", s.URL.String(), serviceName, serviceNamespace)
 	req, _ := http.NewRequest(http.MethodPost, urlPath, bytes.NewReader(requestBody))
 
-	if s.Credentials != nil {
-		req.SetBasicAuth(s.Credentials.User, s.Credentials.Password)
+	if s.AuthInjector != nil {
+		s.AuthInjector.Inject(req)
 	}
 
 	defer req.Body.Close()
@@ -159,6 +159,8 @@ func (s ExternalServiceQuery) SetReplicas(serviceName string, count uint64) erro
 	if !(res.StatusCode == http.StatusOK || res.StatusCode == http.StatusAccepted) {
 		err = fmt.Errorf("error scaling HTTP code %d, %s", res.StatusCode, urlPath)
 	}
+
+	log.Printf("SetReplicas [%s.%s] took: %fs", serviceName, serviceNamespace, time.Since(start).Seconds())
 
 	return err
 }

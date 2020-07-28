@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/openfaas/faas-provider/auth"
+	middleware "github.com/openfaas/faas/gateway/pkg/middleware"
 	"github.com/openfaas/faas/gateway/scaling"
 )
 
@@ -47,13 +47,12 @@ func TestGetReplicasNonExistentFn(t *testing.T) {
 		}))
 	defer testServer.Close()
 
-	var creds auth.BasicAuthCredentials
-
+	var injector middleware.AuthInjector
 	url, _ := url.Parse(testServer.URL + "/")
 
-	esq := NewExternalServiceQuery(*url, &creds)
+	esq := NewExternalServiceQuery(*url, injector)
 
-	svcQryResp, err := esq.GetReplicas("burt")
+	svcQryResp, err := esq.GetReplicas("figlet", "")
 
 	if err == nil {
 		t.Logf("Error was nil, expected non-nil - the service query response value was %+v ", svcQryResp)
@@ -78,13 +77,12 @@ func TestGetReplicasExistentFn(t *testing.T) {
 		AvailableReplicas: 0,
 	}
 
-	var creds auth.BasicAuthCredentials
-
+	var injector middleware.AuthInjector
 	url, _ := url.Parse(testServer.URL + "/")
 
-	esq := NewExternalServiceQuery(*url, &creds)
+	esq := NewExternalServiceQuery(*url, injector)
 
-	svcQryResp, err := esq.GetReplicas("burt")
+	svcQryResp, err := esq.GetReplicas("figlet", "")
 
 	if err != nil {
 		t.Logf("Expected err to be nil got: %s ", err.Error())
@@ -104,11 +102,11 @@ func TestSetReplicasNonExistentFn(t *testing.T) {
 		}))
 	defer testServer.Close()
 
-	var creds auth.BasicAuthCredentials
+	var injector middleware.AuthInjector
 	url, _ := url.Parse(testServer.URL + "/")
-	esq := NewExternalServiceQuery(*url, &creds)
+	esq := NewExternalServiceQuery(*url, injector)
 
-	err := esq.SetReplicas("burt", 1)
+	err := esq.SetReplicas("figlet", "", 1)
 
 	expectedErrStr := "error scaling HTTP code 500"
 
@@ -126,11 +124,12 @@ func TestSetReplicasExistentFn(t *testing.T) {
 		}))
 	defer testServer.Close()
 
-	var creds auth.BasicAuthCredentials
-	url, _ := url.Parse(testServer.URL + "/")
-	esq := NewExternalServiceQuery(*url, &creds)
+	var injector middleware.AuthInjector
 
-	err := esq.SetReplicas("burt", 1)
+	url, _ := url.Parse(testServer.URL + "/")
+	esq := NewExternalServiceQuery(*url, injector)
+
+	err := esq.SetReplicas("figlet", "", 1)
 
 	if err != nil {
 		t.Logf("Expected err to be nil got: %s ", err.Error())

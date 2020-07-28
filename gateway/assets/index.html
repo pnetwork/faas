@@ -26,7 +26,7 @@
     <div layout="column" ng-cloak>
 
         <md-toolbar class="md-theme-indigo" hide-gt-sm>
-            <div class="md-toolbar-tools">
+            <div class="md-toolbar-tools no-pad">
                 <md-button ng-click="toggleSideNav()" class="md-icon-button" aria-label="Menu">
                     <md-icon md-svg-icon="img/icons/ic_menu_white.svg"></md-icon>
                 </md-button>
@@ -36,9 +36,9 @@
             <md-sidenav class="md-sidenav-left" md-component-id="left" md-is-locked-open="$mdMedia('gt-sm')" md-whiteframe="4" layout="column">
 
                 <md-toolbar class="md-theme-indigo">
-                    <div class="md-toolbar-tools">
-                        <a href="https://www.openfaas.com/" target="_blank"><img src="icon.png" alt="OpenFaaS Icon" width="60px" height="60px" class="md-avatar" /></a>
-                        <h1 style="flex: 1 1 auto;">&nbsp; OpenFaaS Portal</h1>
+                    <div class="md-toolbar-tools no-pad">
+                        <a href="https://www.openfaas.com/" target="_blank"><img src="icon.png" alt="OpenFaaS Icon" class="md-avatar" /></a>
+                        <h1 style="flex: 1 1 auto;"><img src="img/logo-text.svg" class="md-logo"></h1>
                         <md-button ng-click="toggleSideNav()" class="md-icon-button" aria-label="Back" hide-gt-sm>
                             <md-icon md-svg-icon="img/icons/ic_arrow_back_white.svg"></md-icon>
                         </md-button>
@@ -46,12 +46,22 @@
                 </md-toolbar>
 
                 <md-content layout-padding>
+
                     <md-list>
                         <md-list-item class="primary-item" ng-disabled="isFunctionBeingCreated" ng-click="newFunction()">
                             <md-icon style="margin-right: 16px" md-svg-icon="img/icons/ic_shop_two_black_24px.svg"></md-icon>
                             <p>Deploy New Function</p>
                         </md-list-item>
                     </md-list>
+
+                    <md-input-container ng-show="allNamespaces.length > 1" class="display-flex">
+                        <label>Namespace</label>
+                        <md-select  ng-model="namespaceSelectDropdown" placeholder="Select a Namespace">
+                            <md-option ng-click="setNamespace(namespace)" ng-value="namespace" ng-repeat="namespace in allNamespaces" ng-selected="namespace === selectedNamespace">
+                                {{ namespace }}
+                            </md-option>
+                        </md-select>
+                    </md-input-container>
 
                     <md-input-container ng-hide="functions.length === 0" class="md-block" flex-gt-sm>
                         <label style="padding-left: 8px">Search for Function</label>
@@ -116,6 +126,11 @@
                                     <label>Invocation count</label>
                                     <input ng-model="function.invocationCount" type="text" readonly="readonly">
                                 </md-input-container>
+
+                                <md-input-container class="md-block" flex-gt-sm ng-show="allNamespaces.length > 1">
+                                    <label>Namespace</label>
+                                    <input ng-model="function.namespace" type="text" readonly="readonly">
+                                </md-input-container>
                             </div>
 
                             <div layout-gt-sm="row">
@@ -125,7 +140,7 @@
                                 </md-input-container>
                                 <md-input-container class="md-block function-url" flex-gt-sm>
                                     <label>URL</label>
-                                    <input ng-value="baseUrl + 'function/' + function.name" type="text" readonly="readonly">
+                                    <input ng-value="(function.namespace && function.namespace.length > 0 && allNamespaces && allNamespaces.length > 1)? baseUrl + 'function/' + function.name + '.' + function.namespace : baseUrl + 'function/' + function.name" type="text" readonly="readonly">
                                     <md-icon ng-if="canCopyToClipboard" md-svg-src="img/icons/outline-file_copy-24px.svg" ng-click="copyClicked($event)"></md-icon>
                                 </md-input-container>
                             </div>

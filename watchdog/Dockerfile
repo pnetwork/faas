@@ -1,17 +1,23 @@
-FROM golang:1.9.7 as build
+FROM golang:1.13 as build
+
+ENV GO111MODULE=off
+ENV CGO_ENABLED=0
+
 ARG VERSION
 ARG GIT_COMMIT
 
 RUN mkdir -p /go/src/github.com/openfaas/faas/watchdog
 WORKDIR /go/src/github.com/openfaas/faas/watchdog
 
-COPY main.go            	.
-COPY handler.go			.
-COPY readconfig.go      	.
-COPY readconfig_test.go 	.
+COPY vendor                     vendor
+COPY metrics                    metrics
+COPY types                      types
+COPY main.go                    .
+COPY handler.go			        .
+COPY readconfig.go      	    .
+COPY readconfig_test.go 	    .
 COPY requesthandler_test.go 	.
-COPY types 			types
-COPY version.go 		.
+COPY version.go                 .
 
 # Run a gofmt and exclude all vendored code.
 RUN test -z "$(gofmt -l $(find . -type f -name '*.go' -not -path "./vendor/*"))"

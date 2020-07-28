@@ -15,14 +15,14 @@ import (
 	"log"
 
 	"github.com/openfaas/faas-provider/auth"
-	"github.com/openfaas/faas/gateway/requests"
+	types "github.com/openfaas/faas-provider/types"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 // Exporter is a prometheus exporter
 type Exporter struct {
 	metricOptions MetricOptions
-	services      []requests.Function
+	services      []types.FunctionStatus
 	credentials   *auth.BasicAuthCredentials
 }
 
@@ -30,16 +30,21 @@ type Exporter struct {
 func NewExporter(options MetricOptions, credentials *auth.BasicAuthCredentials) *Exporter {
 	return &Exporter{
 		metricOptions: options,
-		services:      []requests.Function{},
+		services:      []types.FunctionStatus{},
 		credentials:   credentials,
 	}
 }
 
 // Describe is to describe the metrics for Prometheus
 func (e *Exporter) Describe(ch chan<- *prometheus.Desc) {
+
 	e.metricOptions.GatewayFunctionInvocation.Describe(ch)
 	e.metricOptions.GatewayFunctionsHistogram.Describe(ch)
 	e.metricOptions.ServiceReplicasGauge.Describe(ch)
+	e.metricOptions.GatewayFunctionInvocationStarted.Describe(ch)
+
+	e.metricOptions.ServiceMetrics.Counter.Describe(ch)
+	e.metricOptions.ServiceMetrics.Histogram.Describe(ch)
 }
 
 // Collect collects data to be consumed by prometheus
@@ -47,13 +52,19 @@ func (e *Exporter) Collect(ch chan<- prometheus.Metric) {
 	e.metricOptions.GatewayFunctionInvocation.Collect(ch)
 	e.metricOptions.GatewayFunctionsHistogram.Collect(ch)
 
+	e.metricOptions.GatewayFunctionInvocationStarted.Collect(ch)
+
 	e.metricOptions.ServiceReplicasGauge.Reset()
 	for _, service := range e.services {
 		e.metricOptions.ServiceReplicasGauge.
 			WithLabelValues(service.Name).
 			Set(float64(service.Replicas))
 	}
+
 	e.metricOptions.ServiceReplicasGauge.Collect(ch)
+
+	e.metricOptions.ServiceMetrics.Counter.Collect(ch)
+	e.metricOptions.ServiceMetrics.Histogram.Collect(ch)
 }
 
 // StartServiceWatcher starts a ticker and collects service replica counts to expose to prometheus
@@ -87,7 +98,7 @@ func (e *Exporter) StartServiceWatcher(endpointURL url.URL, metricsOptions Metri
 					get.SetBasicAuth(e.credentials.User, e.credentials.Password)
 				}
 
-				services := []requests.Function{}
+				services := []types.FunctionStatus{}
 				res, err := proxyClient.Do(get)
 				if err != nil {
 					log.Println(err)

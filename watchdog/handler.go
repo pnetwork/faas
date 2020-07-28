@@ -17,6 +17,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	limiter "github.com/openfaas/faas-middleware/concurrency-limiter"
+
 	"github.com/openfaas/faas/watchdog/types"
 )
 
@@ -92,6 +94,9 @@ func pipeRequest(config *WatchdogConfig, w http.ResponseWriter, r *http.Request,
 	var buildInputErr error
 	requestBody, buildInputErr = buildFunctionInput(config, r)
 	if buildInputErr != nil {
+		if config.writeDebug == true {
+			log.Printf("Error=%s, ReadLen=%d\n", buildInputErr.Error(), len(requestBody))
+		}
 		ri.headerWritten = true
 		w.WriteHeader(http.StatusBadRequest)
 		// I.e. "exit code 1"
@@ -109,10 +114,7 @@ func pipeRequest(config *WatchdogConfig, w http.ResponseWriter, r *http.Request,
 	var timer *time.Timer
 
 	if config.execTimeout > 0*time.Second {
-		timer = time.NewTimer(config.execTimeout)
-
-		go func() {
-			<-timer.C
+		timer = time.AfterFunc(config.execTimeout, func() {
 			log.Printf("Killing process: %s\n", config.faasProcess)
 			if targetCmd != nil && targetCmd.Process != nil {
 				ri.headerWritten = true
@@ -125,7 +127,7 @@ func pipeRequest(config *WatchdogConfig, w http.ResponseWriter, r *http.Request,
 					log.Printf("Killed process: %s - error %s\n", config.faasProcess, val.Error())
 				}
 			}
-		}()
+		})
 	}
 
 	// Write to pipe in separate go-routine to prevent blocking
@@ -213,9 +215,9 @@ func pipeRequest(config *WatchdogConfig, w http.ResponseWriter, r *http.Request,
 	}
 
 	if len(bytesWritten) > 0 {
-		log.Printf("%s - Duration: %f seconds", bytesWritten, execDuration)
+		log.Printf("%s - Duration: %fs", bytesWritten, execDuration)
 	} else {
-		log.Printf("Duration: %f seconds", execDuration)
+		log.Printf("Duration: %fs", execDuration)
 	}
 }
 
@@ -231,7 +233,13 @@ func getAdditionalEnvs(config *WatchdogConfig, r *http.Request, method string) [
 		}
 
 		envs = append(envs, fmt.Sprintf("Http_Method=%s", method))
+		// Deprecation notice: Http_ContentLength will be deprecated
 		envs = append(envs, fmt.Sprintf("Http_ContentLength=%d", r.ContentLength))
+		envs = append(envs, fmt.Sprintf("Http_Content_Length=%d", r.ContentLength))
+
+		if len(r.TransferEncoding) > 0 {
+			envs = append(envs, fmt.Sprintf("Http_Transfer_Encoding=%s", r.TransferEncoding[0]))
+		}
 
 		if config.writeDebug {
 			log.Println("Query ", r.URL.RawQuery)
@@ -295,8 +303,8 @@ func makeHealthHandler() func(http.ResponseWriter, *http.Request) {
 	}
 }
 
-func makeRequestHandler(config *WatchdogConfig) func(http.ResponseWriter, *http.Request) {
-	return func(w http.ResponseWriter, r *http.Request) {
+func makeRequestHandler(config *WatchdogConfig) http.HandlerFunc {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case
 			http.MethodPost,
@@ -310,5 +318,6 @@ func makeRequestHandler(config *WatchdogConfig) func(http.ResponseWriter, *http.
 			w.WriteHeader(http.StatusMethodNotAllowed)
 
 		}
-	}
+	})
+	return limiter.NewConcurrencyLimiter(handler, config.maxInflight).ServeHTTP
 }

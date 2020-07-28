@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"math"
 	"net/http"
 
 	"github.com/openfaas/faas/gateway/requests"
@@ -15,7 +16,7 @@ import (
 )
 
 // MakeAlertHandler handles alerts from Prometheus Alertmanager
-func MakeAlertHandler(service scaling.ServiceQuery) http.HandlerFunc {
+func MakeAlertHandler(service scaling.ServiceQuery, defaultNamespace string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		log.Println("Alert received.")
@@ -41,7 +42,7 @@ func MakeAlertHandler(service scaling.ServiceQuery) http.HandlerFunc {
 			return
 		}
 
-		errors := handleAlerts(&req, service)
+		errors := handleAlerts(&req, service, defaultNamespace)
 		if len(errors) > 0 {
 			log.Println(errors)
 			var errorOutput string
@@ -57,10 +58,10 @@ func MakeAlertHandler(service scaling.ServiceQuery) http.HandlerFunc {
 	}
 }
 
-func handleAlerts(req *requests.PrometheusAlert, service scaling.ServiceQuery) []error {
+func handleAlerts(req *requests.PrometheusAlert, service scaling.ServiceQuery, defaultNamespace string) []error {
 	var errors []error
 	for _, alert := range req.Alerts {
-		if err := scaleService(alert, service); err != nil {
+		if err := scaleService(alert, service, defaultNamespace); err != nil {
 			log.Println(err)
 			errors = append(errors, err)
 		}
@@ -69,12 +70,13 @@ func handleAlerts(req *requests.PrometheusAlert, service scaling.ServiceQuery) [
 	return errors
 }
 
-func scaleService(alert requests.PrometheusInnerAlert, service scaling.ServiceQuery) error {
+func scaleService(alert requests.PrometheusInnerAlert, service scaling.ServiceQuery, defaultNamespace string) error {
 	var err error
-	serviceName := alert.Labels.FunctionName
+
+	serviceName, namespace := getNamespace(defaultNamespace, alert.Labels.FunctionName)
 
 	if len(serviceName) > 0 {
-		queryResponse, getErr := service.GetReplicas(serviceName)
+		queryResponse, getErr := service.GetReplicas(serviceName, namespace)
 		if getErr == nil {
 			status := alert.Status
 
@@ -85,7 +87,7 @@ func scaleService(alert requests.PrometheusInnerAlert, service scaling.ServiceQu
 				return nil
 			}
 
-			updateErr := service.SetReplicas(serviceName, newReplicas)
+			updateErr := service.SetReplicas(serviceName, namespace, newReplicas)
 			if updateErr != nil {
 				err = updateErr
 			}
@@ -96,18 +98,15 @@ func scaleService(alert requests.PrometheusInnerAlert, service scaling.ServiceQu
 
 // CalculateReplicas decides what replica count to set depending on current/desired amount
 func CalculateReplicas(status string, currentReplicas uint64, maxReplicas uint64, minReplicas uint64, scalingFactor uint64) uint64 {
-	newReplicas := currentReplicas
-	step := uint64((float64(maxReplicas) / 100) * float64(scalingFactor))
+	var newReplicas uint64
+
+	step := uint64(math.Ceil(float64(maxReplicas) / 100 * float64(scalingFactor)))
 
 	if status == "firing" && step > 0 {
-		if currentReplicas == 1 {
-			newReplicas = step
+		if currentReplicas+step > maxReplicas {
+			newReplicas = maxReplicas
 		} else {
-			if currentReplicas+step > maxReplicas {
-				newReplicas = maxReplicas
-			} else {
-				newReplicas = currentReplicas + step
-			}
+			newReplicas = currentReplicas + step
 		}
 	} else { // Resolved event.
 		newReplicas = minReplicas

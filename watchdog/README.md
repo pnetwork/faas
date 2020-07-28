@@ -38,9 +38,9 @@ Here's how to package your function if you don't want to use the CLI or have exi
 Example Dockerfile for an `echo` function:
 
 ```
-FROM alpine:3.8
+FROM alpine:3.11
 
-ADD https://github.com/openfaas/faas/releases/download/0.9.6/fwatchdog /usr/bin
+ADD https://github.com/openfaas/faas/releases/download/0.18.10/fwatchdog /usr/bin
 RUN chmod +x /usr/bin/fwatchdog
 
 # Define your binary here
@@ -54,7 +54,7 @@ You can optimize Docker to cache getting the watchdog by using curl, instead of 
 To do so, replace the related lines with:
 ```
 RUN apk --no-cache add curl \
-    && curl -sL https://github.com/openfaas/faas/releases/download/0.9.6/fwatchdog > /usr/bin/fwatchdog \
+    && curl -sL https://github.com/openfaas/faas/releases/download/0.9.14/fwatchdog > /usr/bin/fwatchdog \
     && chmod +x /usr/bin/fwatchdog
 ```
 
@@ -70,7 +70,7 @@ For Kubernetes the health check is added through automation without you needing 
 
 A Docker Swarm Healthcheck is required and is best practice. It will make sure that the watchdog is ready to accept a request before forwarding requests via the API Gateway. If the function or watchdog runs into an unrecoverable issue Swarm will also be able to restart the container.
 
-Here is an example of the `echo` function implementing a healthcheck with a 5-second checking interval.
+Here is an example of the `echo` function implementing a *health check* with a 5-second checking interval.
 
 ```
 FROM functions/alpine
@@ -102,6 +102,7 @@ The watchdog can be configured through environmental variables. You must always 
 | `exec_timeout`         | Hard timeout for process exec'd for each incoming request (in seconds). Disabled if set to 0 |
 | `write_debug`          | Write all output, error messages, and additional information to the logs. Default is false |
 | `combine_output`       | True by default - combines stdout/stderr in function response, when set to false `stderr` is written to the container logs and stdout is used for function response |
+| `max_inflight`         | Limit the maximum number of requests in flight |
 
 ## Advanced / tuning
 
@@ -133,9 +134,10 @@ The `X-Forwarded-By` header becomes available as `Http_X_Forwarded_By`
 
 * `Http_Method` - GET/POST etc
 * `Http_Query` - QueryString value
-* `Http_ContentLength` - gives the total content-length of the incoming HTTP request received by the watchdog.
+* `Http_ContentLength` and `Http_Content_Length` - gives the total content-length of the incoming HTTP request received by the watchdog, see note below
+* `Http_Transfer_Encoding` - only set when provided, if set to `chunked` the Content-Length will be `-1` to show that it does not apply
 
-> This behaviour is enabled by the `cgi_headers` environmental variable which is enabled by default.
+> This behaviour is enabled by the `cgi_headers` environmental variable which is enabled (`true`) by default.
 
 Here's an example of a POST request with an additional header and a query-string.
 
@@ -198,7 +200,7 @@ To override the Content-Type of all your responses set the `content_type` enviro
 
 This is an unsupported use-case for the OpenFaaS project however if your container conforms to the requirements below then the OpenFaaS API gateway and other tooling will manage and scale your service.
 
-You will need to provide a lock-file at `/tmp/.lock` so that the orchestration system can run healthchecks on your container. If you are using Docker Swarm make sure you provide a `HEALTHCHECK` instruction in your Dockerfile - samples are given in the `faas` repository.
+You will need to provide a lock-file at `/tmp/.lock` so that the orchestration system can run *health checks* against your container. If you are using Docker Swarm make sure you provide a `HEALTHCHECK` instruction in your Dockerfile - samples are given in the `faas` repository.
 
 * Expose TCP port 8080 over HTTP
 * Create `/tmp/.lock` or in whatever location responds to the OS tempdir syscall
@@ -214,7 +216,7 @@ Auto-scaling starts at 1 replica and steps up in blocks of 5:
 
 You can override the minimum and maximum scale of a function through labels.
 
-Add these labels to the deployment if you want to sacle between 2 and 15 replicas.
+Add these labels to the deployment if you want to scale between 2 and 15 replicas.
 
 ```
 com.openfaas.scale.min: "2"

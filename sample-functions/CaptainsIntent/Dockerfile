@@ -1,9 +1,12 @@
-FROM alpine:3.8
+FROM openfaas/classic-watchdog:0.18.8 as watchdog
+
+FROM alpine:3.11
 RUN apk --update add nodejs nodejs-npm
 
-RUN apk --no-cache add curl \
-    && curl -sL https://github.com/openfaas/faas/releases/download/0.9.6/fwatchdog > /usr/bin/fwatchdog \
-    && chmod +x /usr/bin/fwatchdog
+COPY --from=watchdog /fwatchdog /usr/bin/fwatchdog
+RUN chmod +x /usr/bin/fwatchdog
+
+WORKDIR /application/
 
 COPY package.json   .
 COPY handler.js     .
@@ -12,4 +15,7 @@ COPY sample.json    .
 
 RUN npm i
 ENV fprocess="node handler.js"
+
+USER 1000
+
 CMD ["fwatchdog"]

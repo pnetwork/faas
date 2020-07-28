@@ -3,7 +3,7 @@ package metrics
 import (
 	"testing"
 
-	"github.com/openfaas/faas/gateway/requests"
+	types "github.com/openfaas/faas-provider/types"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
 )
@@ -36,40 +36,43 @@ func Test_Describe_DescribesThePrometheusMetrics(t *testing.T) {
 	exporter := NewExporter(metricsOptions, nil)
 
 	ch := make(chan *prometheus.Desc)
-	defer close(ch)
+	// defer close(ch)
 
 	go exporter.Describe(ch)
 
-	d := (<-ch)
-	expectedGatewayFunctionInvocationDesc := `Desc{fqName: "gateway_function_invocation_total", help: "Individual function metrics", constLabels: {}, variableLabels: [function_name code]}`
+	d := <-ch
+	expectedGatewayFunctionInvocationDesc := `Desc{fqName: "gateway_function_invocation_total", help: "Function metrics", constLabels: {}, variableLabels: [function_name code]}`
 	actualGatewayFunctionInvocationDesc := d.String()
 	if expectedGatewayFunctionInvocationDesc != actualGatewayFunctionInvocationDesc {
 		t.Errorf("Want %s, got: %s", expectedGatewayFunctionInvocationDesc, actualGatewayFunctionInvocationDesc)
 	}
-	d = (<-ch)
+
+	d = <-ch
 	expectedGatewayFunctionsHistogramDesc := `Desc{fqName: "gateway_functions_seconds", help: "Function time taken", constLabels: {}, variableLabels: [function_name]}`
 	actualGatewayFunctionsHistogramDesc := d.String()
 	if expectedGatewayFunctionsHistogramDesc != actualGatewayFunctionsHistogramDesc {
 		t.Errorf("Want %s, got: %s", expectedGatewayFunctionsHistogramDesc, actualGatewayFunctionsHistogramDesc)
 	}
-	d = (<-ch)
-	expectedServiceReplicasGaugeDesc := `Desc{fqName: "gateway_service_count", help: "Docker service replicas", constLabels: {}, variableLabels: [function_name]}`
+
+	d = <-ch
+	expectedServiceReplicasGaugeDesc := `Desc{fqName: "gateway_service_count", help: "Service replicas", constLabels: {}, variableLabels: [function_name]}`
 	actualServiceReplicasGaugeDesc := d.String()
 	if expectedServiceReplicasGaugeDesc != actualServiceReplicasGaugeDesc {
 		t.Errorf("Want %s, got: %s", expectedServiceReplicasGaugeDesc, actualServiceReplicasGaugeDesc)
 	}
+
 }
 
 func Test_Collect_CollectsTheNumberOfReplicasOfAService(t *testing.T) {
 	metricsOptions := BuildMetricsOptions()
 	exporter := NewExporter(metricsOptions, nil)
 
-	expectedService := requests.Function{
+	expectedService := types.FunctionStatus{
 		Name:     "function_with_two_replica",
 		Replicas: 2,
 	}
 
-	exporter.services = []requests.Function{expectedService}
+	exporter.services = []types.FunctionStatus{expectedService}
 
 	ch := make(chan prometheus.Metric)
 	defer close(ch)

@@ -11,13 +11,11 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/openfaas/faas/gateway/metrics"
+	"github.com/openfaas/faas/gateway/pkg/middleware"
 	"github.com/openfaas/faas/gateway/types"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // functionMatcher parses out the service name (group 1) and rest of path (group 2).
@@ -31,11 +29,6 @@ const (
 	pathIndex    = 2 // pathIndex is the path i.e. /employee/:id/
 )
 
-// HTTPNotifier notify about HTTP request/response
-type HTTPNotifier interface {
-	Notify(method string, URL string, originalURL string, statusCode int, duration time.Duration)
-}
-
 // BaseURLResolver URL resolver for upstream requests
 type BaseURLResolver interface {
 	Resolve(r *http.Request) string
@@ -47,16 +40,29 @@ type URLPathTransformer interface {
 }
 
 // MakeForwardingProxyHandler create a handler which forwards HTTP requests
-func MakeForwardingProxyHandler(proxy *types.HTTPClientReverseProxy, notifiers []HTTPNotifier, baseURLResolver BaseURLResolver, urlPathTransformer URLPathTransformer) http.HandlerFunc {
+func MakeForwardingProxyHandler(proxy *types.HTTPClientReverseProxy,
+	notifiers []HTTPNotifier,
+	baseURLResolver BaseURLResolver,
+	urlPathTransformer URLPathTransformer,
+	serviceAuthInjector middleware.AuthInjector) http.HandlerFunc {
+
+	writeRequestURI := false
+	if _, exists := os.LookupEnv("write_request_uri"); exists {
+		writeRequestURI = exists
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		baseURL := baseURLResolver.Resolve(r)
 		originalURL := r.URL.String()
-
 		requestURL := urlPathTransformer.Transform(r)
+
+		for _, notifier := range notifiers {
+			notifier.Notify(r.Method, requestURL, originalURL, http.StatusProcessing, "started", time.Second*0)
+		}
 
 		start := time.Now()
 
-		statusCode, err := forwardRequest(w, r, proxy.Client, baseURL, requestURL, proxy.Timeout)
+		statusCode, err := forwardRequest(w, r, proxy.Client, baseURL, requestURL, proxy.Timeout, writeRequestURI, serviceAuthInjector)
 
 		seconds := time.Since(start)
 		if err != nil {
@@ -64,7 +70,7 @@ func MakeForwardingProxyHandler(proxy *types.HTTPClientReverseProxy, notifiers [
 		}
 
 		for _, notifier := range notifiers {
-			notifier.Notify(r.Method, requestURL, originalURL, statusCode, seconds)
+			notifier.Notify(r.Method, requestURL, originalURL, statusCode, "completed", seconds)
 		}
 	}
 }
@@ -79,10 +85,12 @@ func buildUpstreamRequest(r *http.Request, baseURL string, requestURL string) *h
 	upstreamReq, _ := http.NewRequest(r.Method, url, nil)
 
 	copyHeaders(upstreamReq.Header, &r.Header)
+	deleteHeaders(&upstreamReq.Header, &hopHeaders)
 
 	if len(r.Host) > 0 && upstreamReq.Header.Get("X-Forwarded-Host") == "" {
 		upstreamReq.Header["X-Forwarded-Host"] = []string{r.Host}
 	}
+
 	if upstreamReq.Header.Get("X-Forwarded-For") == "" {
 		upstreamReq.Header["X-Forwarded-For"] = []string{r.RemoteAddr}
 	}
@@ -94,18 +102,29 @@ func buildUpstreamRequest(r *http.Request, baseURL string, requestURL string) *h
 	return upstreamReq
 }
 
-func forwardRequest(w http.ResponseWriter, r *http.Request, proxyClient *http.Client, baseURL string, requestURL string, timeout time.Duration) (int, error) {
+func forwardRequest(w http.ResponseWriter,
+	r *http.Request,
+	proxyClient *http.Client,
+	baseURL string,
+	requestURL string,
+	timeout time.Duration,
+	writeRequestURI bool,
+	serviceAuthInjector middleware.AuthInjector) (int, error) {
 
 	upstreamReq := buildUpstreamRequest(r, baseURL, requestURL)
 	if upstreamReq.Body != nil {
 		defer upstreamReq.Body.Close()
 	}
 
-	if _, exists := os.LookupEnv("write_request_uri"); exists {
+	if serviceAuthInjector != nil {
+		serviceAuthInjector.Inject(upstreamReq)
+	}
+
+	if writeRequestURI {
 		log.Printf("forwardRequest: %s %s\n", upstreamReq.Host, upstreamReq.URL.String())
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	ctx, cancel := context.WithTimeout(r.Context(), timeout)
 	defer cancel()
 
 	res, resErr := proxyClient.Do(upstreamReq.WithContext(ctx))
@@ -140,52 +159,10 @@ func copyHeaders(destination http.Header, source *http.Header) {
 	}
 }
 
-// PrometheusFunctionNotifier records metrics to Prometheus
-type PrometheusFunctionNotifier struct {
-	Metrics *metrics.MetricOptions
-}
-
-// Notify records metrics in Prometheus
-func (p PrometheusFunctionNotifier) Notify(method string, URL string, originalURL string, statusCode int, duration time.Duration) {
-	seconds := duration.Seconds()
-	serviceName := getServiceName(originalURL)
-
-	p.Metrics.GatewayFunctionsHistogram.
-		WithLabelValues(serviceName).
-		Observe(seconds)
-
-	code := strconv.Itoa(statusCode)
-
-	p.Metrics.GatewayFunctionInvocation.
-		With(prometheus.Labels{"function_name": serviceName, "code": code}).
-		Inc()
-}
-
-func getServiceName(urlValue string) string {
-	var serviceName string
-	forward := "/function/"
-	if strings.HasPrefix(urlValue, forward) {
-		// With a path like `/function/xyz/rest/of/path?q=a`, the service
-		// name we wish to locate is just the `xyz` portion.  With a postive
-		// match on the regex below, it will return a three-element slice.
-		// The item at index `0` is the same as `urlValue`, at `1`
-		// will be the service name we need, and at `2` the rest of the path.
-		matcher := functionMatcher.Copy()
-		matches := matcher.FindStringSubmatch(urlValue)
-		if len(matches) == hasPathCount {
-			serviceName = matches[nameIndex]
-		}
+func deleteHeaders(target *http.Header, exclude *[]string) {
+	for _, h := range *exclude {
+		target.Del(h)
 	}
-	return strings.Trim(serviceName, "/")
-}
-
-// LoggingNotifier notifies a log about a request
-type LoggingNotifier struct {
-}
-
-// Notify a log about a request
-func (LoggingNotifier) Notify(method string, URL string, originalURL string, statusCode int, duration time.Duration) {
-	log.Printf("Forwarded [%s] to %s - [%d] - %f seconds", method, originalURL, statusCode, duration.Seconds())
 }
 
 // SingleHostBaseURLResolver resolves URLs against a single BaseURL
@@ -206,7 +183,8 @@ func (s SingleHostBaseURLResolver) Resolve(r *http.Request) string {
 
 // FunctionAsHostBaseURLResolver resolves URLs using a function from the URL as a host
 type FunctionAsHostBaseURLResolver struct {
-	FunctionSuffix string
+	FunctionSuffix    string
+	FunctionNamespace string
 }
 
 // Resolve the base URL for a request
@@ -215,8 +193,13 @@ func (f FunctionAsHostBaseURLResolver) Resolve(r *http.Request) string {
 
 	const watchdogPort = 8080
 	var suffix string
+
 	if len(f.FunctionSuffix) > 0 {
-		suffix = "." + f.FunctionSuffix
+		if index := strings.LastIndex(svcName, "."); index > -1 && len(svcName) > index+1 {
+			suffix = strings.Replace(f.FunctionSuffix, f.FunctionNamespace, "", -1)
+		} else {
+			suffix = "." + f.FunctionSuffix
+		}
 	}
 
 	return fmt.Sprintf("http://%s%s:%d", svcName, suffix, watchdogPort)
@@ -254,4 +237,22 @@ func (f FunctionPrefixTrimmingURLPathTransformer) Transform(r *http.Request) str
 	}
 
 	return ret
+}
+
+// Hop-by-hop headers. These are removed when sent to the backend.
+// As of RFC 7230, hop-by-hop headers are required to appear in the
+// Connection header field. These are the headers defined by the
+// obsoleted RFC 2616 (section 13.5.1) and are used for backward
+// compatibility.
+// Copied from: https://golang.org/src/net/http/httputil/reverseproxy.go
+var hopHeaders = []string{
+	"Connection",
+	"Proxy-Connection", // non-standard but still sent by libcurl and rejected by e.g. google
+	"Keep-Alive",
+	"Proxy-Authenticate",
+	"Proxy-Authorization",
+	"Te",      // canonicalized version of "TE"
+	"Trailer", // not Trailers per URL above; https://www.rfc-editor.org/errata_search.php?eid=4522
+	"Transfer-Encoding",
+	"Upgrade",
 }

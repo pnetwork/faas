@@ -1,4 +1,7 @@
-FROM golang:1.9.7-alpine
+FROM openfaas/classic-watchdog:0.18.8 as watchdog
+
+FROM golang:1.13-alpine
+ENV CGO_ENABLED=0
 
 MAINTAINER alexellis2@gmail.com
 ENTRYPOINT []
@@ -8,11 +11,13 @@ COPY . /go/src/github.com/openfaas/faas/sample-functions/golang
 
 RUN go install
 
-RUN apk --no-cache add curl \
-    && curl -sL https://github.com/openfaas/faas/releases/download/0.9.6/fwatchdog > /usr/bin/fwatchdog \
-    && chmod +x /usr/bin/fwatchdog
+COPY --from=watchdog /fwatchdog /usr/bin/fwatchdog
+RUN chmod +x /usr/bin/fwatchdog
 
 ENV fprocess "/go/bin/golang"
 HEALTHCHECK --interval=1s CMD [ -e /tmp/.lock ] || exit 1
 
-CMD [ "/usr/bin/fwatchdog"]
+RUN addgroup -g 1000 -S app && adduser -u 1000 -S app -G app
+USER 1000
+
+CMD [ "fwatchdog"]

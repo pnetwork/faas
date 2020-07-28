@@ -91,6 +91,9 @@ func (ReadConfig) Read(hasEnv HasEnv) WatchdogConfig {
 		cfg.combineOutput = parseBoolValue(hasEnv.Getenv("combine_output"))
 	}
 
+	cfg.metricsPort = 8081
+	cfg.maxInflight = parseIntValue(hasEnv.Getenv("max_inflight"), 0)
+
 	return cfg
 }
 
@@ -132,4 +135,13 @@ type WatchdogConfig struct {
 
 	// combineOutput combines stderr and stdout in response
 	combineOutput bool
+
+	// metricsPort is the HTTP port to serve metrics on
+	metricsPort int
+
+	// maxInflight limits the number of simultaneous
+	// requests that the watchdog allows concurrently.
+	// Any request which exceeds this limit will
+	// have an immediate response of 429.
+	maxInflight int
 }

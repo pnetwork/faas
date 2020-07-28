@@ -122,8 +122,24 @@ func (f *FunctionScaler) Scale(functionName, namespace string) FunctionScaleResu
 					Duration:  totalTime,
 				}
 			}
+			if queryResponse.Replicas == 0 {
 
+				log.Printf("Some bad guy set replicas to 0")
+
+				return FunctionScaleResult{
+					Error:     nil,
+					Available: false,
+					Found:     true,
+					Duration:  time.Since(start),
+				}
+			}
 			time.Sleep(f.Config.FunctionPollInterval)
+		}
+		return FunctionScaleResult{
+			Error:     nil,
+			Available: false,
+			Found:     true,
+			Duration:  time.Since(start),
 		}
 	}
 

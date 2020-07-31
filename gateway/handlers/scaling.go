@@ -33,6 +33,7 @@ func MakeScalingHandler(next http.HandlerFunc, scaler scaling.FunctionScaler, co
 		res := scaler.Scale(functionName, namespace)
 		for tryChance := 9; tryChance > 0; tryChance-- {
 			if !res.Available {
+				time.Sleep(time.Millisecond * 5000)
 				log.Printf("Function unavailabel after scale, but I still get %d more chances to try", tryChance)
 				res = scaler.Scale(functionName, namespace)
 				continue

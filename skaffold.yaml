@@ -1,0 +1,8 @@
+apiVersion: skaffold/v1beta10
+kind: Config
+build:
+  artifacts:
+  - image: faas-gateway
+    context: ./gateway
+  local:
+    useDockerCLI: true

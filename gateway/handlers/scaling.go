@@ -65,6 +65,11 @@ func MakeScalingHandler(next http.HandlerFunc, scaler scaling.FunctionScaler, co
 			return
 		}
 
-		log.Printf("[Scale] function=%s.%s 0=>N timed-out after %fs\n", functionName, namespace, res.Duration.Seconds())
+		errStr := fmt.Sprintf("function=%s.%s 0=>N timed-out\n", functionName, namespace)
+		log.Printf("Scaling: %s\n", errStr)
+
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(errStr))
+		return
 	}
 }

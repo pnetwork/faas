@@ -100,7 +100,26 @@ func (f *FunctionScaler) Scale(functionName, namespace string) FunctionScaleResu
 				f.Cache.Set(functionName, namespace, queryResponse)
 			}
 			totalTime := time.Since(start)
+			if queryResponse.Replicas == 0 {
+				log.Printf("Some bad guy set replicas to 0")
 
+				return FunctionScaleResult{
+					Error:     nil,
+					Available: false,
+					Found:     true,
+					Duration:  totalTime,
+				}
+			}
+			if totalTime > time.Second * 30 {
+				log.Printf("Scale function timeout, duration: %d", totalTime)
+				return FunctionScaleResult{
+					Error:     nil,
+					Available: false,
+					Found:     true,
+					Duration:  totalTime,
+				}
+			}
+			
 			if err != nil {
 				return FunctionScaleResult{
 					Error:     err,
@@ -120,17 +139,6 @@ func (f *FunctionScaler) Scale(functionName, namespace string) FunctionScaleResu
 					Available: true,
 					Found:     true,
 					Duration:  totalTime,
-				}
-			}
-			if queryResponse.Replicas == 0 {
-
-				log.Printf("Some bad guy set replicas to 0")
-
-				return FunctionScaleResult{
-					Error:     nil,
-					Available: false,
-					Found:     true,
-					Duration:  time.Since(start),
 				}
 			}
 			time.Sleep(f.Config.FunctionPollInterval)

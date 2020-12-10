@@ -110,7 +110,7 @@ func (f *FunctionScaler) Scale(functionName, namespace string) FunctionScaleResu
 					Duration:  totalTime,
 				}
 			}
-			if totalTime > time.Second * 30 {
+			if totalTime > (time.Second * 30) {
 				log.Printf("Scale function timeout, duration: %d", totalTime)
 				return FunctionScaleResult{
 					Error:     nil,
@@ -119,7 +119,7 @@ func (f *FunctionScaler) Scale(functionName, namespace string) FunctionScaleResu
 					Duration:  totalTime,
 				}
 			}
-			
+
 			if err != nil {
 				return FunctionScaleResult{
 					Error:     err,

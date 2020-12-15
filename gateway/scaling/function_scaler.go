@@ -95,15 +95,36 @@ func (f *FunctionScaler) Scale(functionName, namespace string) FunctionScaleResu
 		}
 
 		for i := 0; i < int(f.Config.MaxPollCount); i++ {
+			totalTime := time.Since(start)
+			if totalTime > (time.Second * 30) {
+				log.Printf("Scale function timeout, duration: %d", totalTime)
+				return FunctionScaleResult{
+					Error:     nil,
+					Available: false,
+					Found:     true,
+					Duration:  totalTime,
+				}
+			}
+
 			queryResponse, err := f.Config.ServiceQuery.GetReplicas(functionName, namespace)
 			if err == nil {
 				f.Cache.Set(functionName, namespace, queryResponse)
 			}
-			totalTime := time.Since(start)
 
 			if err != nil {
 				return FunctionScaleResult{
 					Error:     err,
+					Available: false,
+					Found:     true,
+					Duration:  totalTime,
+				}
+			}
+
+			if queryResponse.Replicas == 0 {
+				log.Printf("Some bad guy set replicas to 0")
+
+				return FunctionScaleResult{
+					Error:     nil,
 					Available: false,
 					Found:     true,
 					Duration:  totalTime,
@@ -120,17 +141,6 @@ func (f *FunctionScaler) Scale(functionName, namespace string) FunctionScaleResu
 					Available: true,
 					Found:     true,
 					Duration:  totalTime,
-				}
-			}
-			if queryResponse.Replicas == 0 {
-
-				log.Printf("Some bad guy set replicas to 0")
-
-				return FunctionScaleResult{
-					Error:     nil,
-					Available: false,
-					Found:     true,
-					Duration:  time.Since(start),
 				}
 			}
 			time.Sleep(f.Config.FunctionPollInterval)

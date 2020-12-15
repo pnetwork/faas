@@ -34,8 +34,8 @@ func MakeScalingHandler(next http.HandlerFunc, scaler scaling.FunctionScaler, co
 		res := scaler.Scale(functionName, namespace)
 		for tryChance := 9; tryChance > 0; tryChance-- {
 			if !res.Available {
-				time.Sleep(time.Millisecond * 5000)
 				log.Printf("Function unavailabel after scale, but I still get %d more chances to try", tryChance)
+				time.Sleep(time.Millisecond * 5000)
 				res = scaler.Scale(functionName, namespace)
 				continue
 			}
@@ -65,6 +65,11 @@ func MakeScalingHandler(next http.HandlerFunc, scaler scaling.FunctionScaler, co
 			return
 		}
 
-		log.Printf("[Scale] function=%s.%s 0=>N timed-out after %fs\n", functionName, namespace, res.Duration.Seconds())
+		errStr := fmt.Sprintf("function=%s.%s 0=>N timed-out\n", functionName, namespace)
+		log.Printf("Scaling: %s\n", errStr)
+
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte(errStr))
+		return
 	}
 }
